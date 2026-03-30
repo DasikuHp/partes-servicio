@@ -624,7 +624,7 @@
             display: block;
             touch-action: none;
             background: #FBFAF8;
-            height: 120px;
+            height: 140px;
         }
 
         .sig-bar {
@@ -653,12 +653,13 @@
             border-radius: var(--radius);
             padding: 16px;
             text-align: center;
-            min-height: 80px;
+            height: 90px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 5px;
+            overflow: hidden;
         }
 
         .sig-tech-box .sig-icon {
@@ -679,6 +680,7 @@
             max-height: 50px;
             max-width: 100%;
             object-fit: contain;
+            display: none;
         }
 
         /* ACTION BAR */
@@ -867,6 +869,7 @@
             border: 1px solid #bbb;
             min-height: 70px;
             padding: 6px;
+            overflow: hidden;
         }
 
         .pd-sig-lbl {
@@ -882,6 +885,7 @@
 
         .pd-sig-img {
             max-height: 44px;
+            max-width: 100%;
             object-fit: contain;
             display: block;
             margin-top: 4px;
@@ -1263,8 +1267,7 @@
                     <span class="sig-icon" id="sig-tech-icon">🔐</span>
                     <span class="sig-name" id="sig-tech-name">Rubén Ortiz</span>
                     <span class="sig-note" id="sig-tech-note">Firma automática según perfil seleccionado</span>
-                    <img id="sig-tech-img" style="display:none;max-height:60px;object-fit:contain;margin-top:4px" src=""
-                        alt="firma técnico">
+                    <img id="sig-tech-img" src="" alt="firma técnico">
                 </div>
             </div>
         </div>
@@ -1668,19 +1671,23 @@ const TECHS = {
             if (!document.getElementById('f-email-cc').value && S.tech)
                 document.getElementById('f-email-cc').value = TECHS[S.tech].defaultCC;
 
-            // Firma cliente: esperar un tick para que el layout esté pintado
+            // Firma cliente: usar doble rAF para garantizar layout completo
             const canvas = document.getElementById('sig-canvas');
             const _initPad = () => {
+                const ratio = window.devicePixelRatio || 1;
                 const w = canvas.offsetWidth || canvas.parentElement?.offsetWidth || 300;
-                canvas.width = w;
-                canvas.height = 120;
+                const h = 140;
+                canvas.width = Math.floor(w * ratio);
+                canvas.height = Math.floor(h * ratio);
+                canvas.getContext('2d').scale(ratio, ratio);
                 if (!S.sigPad) {
                     S.sigPad = new SignaturePad(canvas, { minWidth: 1, maxWidth: 3, penColor: '#18263A' });
                 } else {
-                    S.sigPad.clear(); // refrescar al redimensionar
+                    S.sigPad.clear();
                 }
             };
-            setTimeout(_initPad, 50);
+            // doble requestAnimationFrame = layout + paint completados
+            requestAnimationFrame(() => requestAnimationFrame(_initPad));
             renderMats();
             const _stName = document.getElementById('sig-tech-name');
             if (_stName) _stName.textContent = S.tech ? TECHS[S.tech].name : '';
@@ -2008,8 +2015,12 @@ const TECHS = {
                 if (S.view === 'form' && S.sigPad) {
                     const c = document.getElementById('sig-canvas');
                     if (c) {
+                        const ratio = window.devicePixelRatio || 1;
                         const data = S.sigPad.toData();
-                        c.width = c.offsetWidth || 300;
+                        const w = c.offsetWidth || 300;
+                        c.width = Math.floor(w * ratio);
+                        c.height = Math.floor(140 * ratio);
+                        c.getContext('2d').scale(ratio, ratio);
                         S.sigPad.fromData(data);
                     }
                 }
