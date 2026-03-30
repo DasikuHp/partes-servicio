@@ -86,7 +86,8 @@ router.post('/partes', (req, res) => {
     }
 
     const matsStr = data.mats ? JSON.stringify(data.mats) : null;
-    const fotosStr = data.fotos ? JSON.stringify(data.fotos) : null;
+    const fotosData = data.fotos !== undefined ? data.fotos : data.photoUrls;
+    const fotosStr = fotosData ? JSON.stringify(fotosData) : null;
 
     const sql = `
       INSERT INTO partes (
@@ -110,15 +111,15 @@ router.post('/partes', (req, res) => {
       direccion: data.direccion || null,
       contacto: data.contacto || null,
       telefono: data.telefono || null,
-      email_cliente: data.email_cliente || null,
-      email_para: data.email_para || null,
-      email_cc: data.email_cc || null,
+      email_cliente: data.email_cliente || data.emailCliente || null,
+      email_para: data.email_para || data.emailPara || null,
+      email_cc: data.email_cc || data.emailCC || null,
       fecha: data.fecha || null,
-      hora_entrada: data.hora_entrada || null,
-      hora_salida: data.hora_salida || null,
-      total_horas: data.total_horas || null,
+      hora_entrada: data.hora_entrada || data.horaEntrada || null,
+      hora_salida: data.hora_salida || data.horaSalida || null,
+      total_horas: data.total_horas || data.totalHoras || null,
       desplazamiento: data.desplazamiento || null,
-      descripcion: data.descripcion || null,
+      descripcion: data.descripcion || data.desc || null,
       pendiente: data.pendiente || null,
       mats: matsStr,
       fotos: fotosStr,
@@ -160,10 +161,21 @@ router.put('/partes/:id', (req, res) => {
       'pendiente', 'status', 'pdf_base64'
     ];
 
+    const fieldMap = {
+      email_cliente: data.emailCliente,
+      email_para: data.emailPara,
+      email_cc: data.emailCC,
+      hora_entrada: data.horaEntrada,
+      hora_salida: data.horaSalida,
+      total_horas: data.totalHoras,
+      descripcion: data.desc
+    };
+
     allowedFields.forEach(field => {
-      if (data[field] !== undefined) {
+      const val = data[field] !== undefined ? data[field] : fieldMap[field];
+      if (val !== undefined) {
         updates.push(`${field} = @${field}`);
-        params[field] = data[field];
+        params[field] = val;
       }
     });
 
@@ -172,9 +184,10 @@ router.put('/partes/:id', (req, res) => {
       params.mats = data.mats ? JSON.stringify(data.mats) : null;
     }
 
-    if (data.fotos !== undefined) {
+    const fotosVal = data.fotos !== undefined ? data.fotos : data.photoUrls;
+    if (fotosVal !== undefined) {
       updates.push(`fotos = @fotos`);
-      params.fotos = data.fotos ? JSON.stringify(data.fotos) : null;
+      params.fotos = fotosVal ? JSON.stringify(fotosVal) : null;
     }
 
     if (updates.length > 0) {
@@ -233,80 +246,87 @@ router.delete('/partes/:id', (req, res) => {
   }
 });
 
-// Configurar transporte SMTP (se inicializa una sola vez al cargar el router)
+// Configurar transporte SMTP con configuración robusta para SMTP externo
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || '587', 10),
-  secure: process.env.SMTP_PORT === '465', // true para 465, false p/ otros (587, 2525...)
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true',
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  tls: { rejectUnauthorized: false },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
 });
 
 // POST /api/partes/:id/send
 router.post('/partes/:id/send', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const { para, cc, pdfBase64, filename } = req.body;
+  const id = req.params.id;
+  const { para, cc, pdfBase64, filename } = req.body;
 
-    // 1. Buscar el parte en SQLite (para coger info para el asubunto)
-    const stmt = db.prepare(`SELECT empresa, fecha FROM partes WHERE id = ?`);
-    const parte = stmt.get(id);
+  // 1. Buscar el parte en SQLite
+  const stmt = db.prepare(`SELECT empresa, fecha FROM partes WHERE id = ?`);
+  const parte = stmt.get(id);
 
-    if (!parte) {
-      return res.status(404).json({ error: "Parte no encontrado" });
-    }
+  if (!parte) {
+    return res.status(404).json({ error: "Parte no encontrado" });
+  }
 
-    // 2. Actualizar pdf_base64 y marcar como enviado, además actualizando updated_at
-    const updateStmt = db.prepare(`
-      UPDATE partes 
-      SET pdf_base64 = @pdf_base64, 
-          status = 'sent', 
-          updated_at = datetime('now') 
-      WHERE id = @id
-    `);
-    
-    updateStmt.run({
-      id: id,
-      pdf_base64: pdfBase64 || null
+  // 2. SIEMPRE guardar PDF y marcar como enviado ANTES de intentar email
+  const updateStmt = db.prepare(`
+    UPDATE partes 
+    SET pdf_base64 = @pdf_base64, 
+        status = 'sent', 
+        updated_at = datetime('now') 
+    WHERE id = @id
+  `);
+  
+  updateStmt.run({
+    id: id,
+    pdf_base64: pdfBase64 || null
+  });
+
+  // 3. Preparar array de CC
+  const ccArray = Array.isArray(cc) ? cc : (cc ? [cc] : []);
+
+  // Limpiar base64
+  const pureBase64 = pdfBase64 ? (pdfBase64.includes(',') ? pdfBase64.split(',')[1] : pdfBase64) : '';
+
+  // 4. Parámetros del Email
+  const mailOptions = {
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: para,
+    cc: ccArray,
+    subject: `Parte de Servicio - ${parte.empresa || 'Cliente'}`,
+    html: "<p>Adjunto parte de servicio. Firmado digitalmente.</p>",
+    attachments: []
+  };
+  
+  if (parte.fecha) mailOptions.subject += ` - ${parte.fecha}`;
+
+  if (pureBase64) {
+    mailOptions.attachments.push({
+      filename: filename || 'parte-servicio.pdf',
+      content: pureBase64,
+      encoding: 'base64',
+      contentType: 'application/pdf'
     });
+  }
 
-    // 3. Preparar array de CC
-    const ccArray = Array.isArray(cc) ? cc : (cc ? [cc] : []);
-
-    // Limpiar base64 para evitar errores de codificación en nodemailer
-    // Si el cliente lo mandó con prefijo 'data:application/pdf;base64,', nos quedamos el payload puro
-    const pureBase64 = pdfBase64 ? (pdfBase64.includes(',') ? pdfBase64.split(',')[1] : pdfBase64) : '';
-
-    // 4. Parámetros del Email
-    const mailOptions = {
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: para,
-      cc: ccArray,
-      subject: `Parte de Servicio - ${parte.empresa || 'Cliente'}`,
-      html: "<p>Adjunto parte de servicio. Firmado digitalmente.</p>",
-      attachments: []
-    };
-    
-    // Si se añadió la fecha, la adjuntamos al subject
-    if (parte.fecha) mailOptions.subject += ` - ${parte.fecha}`;
-
-    if (pureBase64) {
-      mailOptions.attachments.push({
-        filename: filename || 'parte-servicio.pdf',
-        content: pureBase64,
-        encoding: 'base64',
-        contentType: 'application/pdf'
-      });
-    }
-
-    // 5. Enviar el email esperando su terminación asíncrona
+  // 5. Intentar enviar email — si falla, NO devolver 500
+  try {
     await transporter.sendMail(mailOptions);
-
-    res.json({ success: true, id });
-  } catch (error) {
-    res.status(500).json({ error: 'Email error', detail: error.message });
+    res.json({ success: true, id, pdfBase64: pdfBase64 || null, emailSent: true });
+  } catch (emailError) {
+    console.error('[SMTP Error]', emailError.message);
+    res.json({ 
+      success: true, 
+      id, 
+      pdfBase64: pdfBase64 || null, 
+      emailSent: false, 
+      emailError: emailError.message 
+    });
   }
 });
 
