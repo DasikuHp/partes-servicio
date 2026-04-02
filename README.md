@@ -193,3 +193,20 @@ curl -X GET "http://localhost:3000/api/partes?status=draft" \
 4. 💾 **Sincronización:** Mediante petición hacia la ruta controladora local, se guardan y serializan los materiales en `.db` (`schema` tipo SQLite usando librerías nativas actualizadas e instanciando modo *WAL*).
 5. 🖨️ **Baking del Comprobante PDF Creado Al Vuelo:** Un `div` virtual HTML pre-maquetado es rellenado con plantillas. Acto seguido `html2canvas` inyecta dicho ticket a una simulación tipo imagen y lo remueve en formato PDF usando el generador `jsPDF` codificando el base64 de vuelta. El servidor **no consume la CPU**, lo hace el navegador por delante.
 6. 🚀 **Distribución Asíncrona SMTP:** El Archivo base64 validado hace push a `/api/partes/:id/send`, la ruta prepara el buffer re-acondicionando su cabecera y delega un servicio de Email con `Nodemailer`.
+
+
+## 📝 LICENCIA - Business Source License 1.1 (BSL 1.1)
+
+**Aparte** está protegido bajo la **BSL 1.1**.
+
+* **Permitido**: Uso personal, investigación, desarrollo interno y contribuciones.
+* **Prohibido**: Uso comercial directo, hosting como SaaS, redistribución o creación de productos competidores sin licencia.
+
+📧 **Contacto Comercial**: [dasikuhp@gmail.com](mailto:dasikuhp@gmail.com)
+
+---
+
+<div align="center">
+  <p>Autor: <strong>DasikuHp</strong> | Versión: aparte-alfa | Actualizado: 2026-04-02</p>
+  <p>🚀 <em>Ready to revolutionize local development.</em></p>
+</div>
